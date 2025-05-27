@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DRICCA COSMÉTICOS</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: Arial, sans-serif; background: #fdfdfd; margin: 0; padding: 0; }
+    header { background: #d63384; color: white; padding: 15px; text-align: center; font-size: 1.5em; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    .container { padding: 20px; max-width: 900px; margin: auto; }
+    .hidden { display: none; }
+    input, button, select, textarea {
+      padding: 10px; margin: 5px 0; width: 100%;
+      box-sizing: border-box; border-radius: 5px; border: 1px solid #ccc;
+    }
+    button { background-color: #d63384; font-size: 0.85em; padding: 6px 10px; color: white; border: none; cursor: pointer; transition: background 0.3s; }
+    button:hover { background-color: #c2185b; }
+    .produto, .produto-admin-item {
+      border: 1px solid #ddd; border-radius: 10px; padding: 10px; margin: 10px 0;
+      display: flex; gap: 15px; align-items: center; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .produto img, .produto-admin-item img {
+      width: 80px; height: 80px; border-radius: 8px; object-fit: cover;
+    }
+    .carrinho-item {
+      display: flex; justify-content: space-between; align-items: center;
+      background: #fafafa; padding: 8px; margin: 5px 0; border-radius: 5px; border: 1px solid #ddd;
+    }
+    .btn-remover { background: #ff4d4d; }
+    .btn-remover:hover { background: #cc0000; }
+    .title {
+      margin-top: 20px; font-size: 1.3em;
+      border-bottom: 2px solid #d63384; padding-bottom: 5px; color: #d63384;
+    }
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js"></script>
+</head>
+<body>
+<header><i class="fa-solid fa-store"></i> DRICCA COSMÉTICOS</header>
+<div class="container">
+<div id="areaCliente" class="hidden">
+<h2 class="title">Bem-vindo, <span id="nomeExibicao"></span></h2>
+<button onclick="mostrarHistorico()">📜 Ver Histórico de Pedidos</button>
+<div id="produtosContainer"></div>
+<h3 class="title">Carrinho</h3>
+<div id="carrinhoContainer"></div>
+<button onclick="finalizarPedido()">Finalizar Pedido (WhatsApp)</button>
+<h3 class="title">Favoritos</h3>
+<div id="favoritosContainer"></div>
+</div>
+<div id="historicoContainer" class="hidden">
+<h2 class="title">Histórico de Pedidos</h2>
+<div id="listaHistorico"></div>
+<button onclick="voltarParaAreaCliente()">Voltar</button>
+</div>
+</div>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAu0i-nJRJFhUmcB2NCYcueR0i7xGA4Rws",
+  authDomain: "dricca-ecommerce.firebaseapp.com",
+  projectId: "dricca-ecommerce",
+  storageBucket: "dricca-ecommerce.appspot.com",
+  messagingSenderId: "202913391561",
+  appId: "1:202913391561:web:50cddc607a67540be4be18"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let clienteLogado = null;
+let carrinho = [];
+let favoritos = [];
+let cupomAtual = "";
+
+async function renderizarProdutos() {
+  const container = document.getElementById("produtosContainer");
+  container.innerHTML = "";
+  const snapshot = await db.collection("produtos").get();
+  snapshot.forEach(doc => {
+    const p = doc.data();
+    const div = document.createElement("div");
+    div.className = "produto";
+    div.innerHTML = `
+      <img src="${p.imagem}">
+      <div>
+        <strong>${p.nome}</strong><br>
+        ${p.descricao}<br>
+        <strong>R$ ${p.preco.toFixed(2)}</strong><br>
+        <button onclick="adicionarAoCarrinho('${doc.id}', '${p.nome}', ${p.preco})">Adicionar</button>
+        <button onclick="toggleFavorito('${doc.id}', '${p.nome}', ${p.preco})">💖</button>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function adicionarAoCarrinho(id, nome, preco) {
+  const item = carrinho.find(i => i.id === id);
+  if (item) {
+    item.quantidade++;
+  } else {
+    carrinho.push({ id, nome, preco, quantidade: 1 });
+  }
+  renderizarCarrinho();
+}
+
+function removerDoCarrinho(id) {
+  carrinho = carrinho.filter(i => i.id !== id);
+  renderizarCarrinho();
+}
+
+function renderizarCarrinho() {
+  const container = document.getElementById("carrinhoContainer");
+  container.innerHTML = "";
+  carrinho.forEach(item => {
+    const div = document.createElement("div");
+    div.className = "carrinho-item";
+    div.innerHTML = `
+      <span>${item.nome} - Qtd: ${item.quantidade}</span>
+      <button onclick="removerDoCarrinho('${item.id}')">Remover</button>
+    `;
+    container.appendChild(div);
+  });
+  const total = carrinho.reduce((s, i) => s + i.preco * i.quantidade, 0);
+  const desconto = (cupomAtual === "DESCONTO10") ? total * 0.1 : 0;
+  const final = total - desconto;
+  const divTotal = document.createElement("div");
+  divTotal.innerHTML = `<strong>Total: R$ ${final.toFixed(2)}</strong>`;
+  container.appendChild(divTotal);
+}
+
+async function finalizarPedido() {
+  let msg = `Olá, sou ${clienteLogado.nome}. Pedido:%0A`;
+  carrinho.forEach(i => msg += `- ${i.nome} (Qtd: ${i.quantidade})%0A`);
+  const total = carrinho.reduce((s, i) => s + i.preco * i.quantidade, 0);
+  let final = total;
+  if (cupomAtual === "DESCONTO10") {
+    final *= 0.9;
+    msg += `Cupom aplicado: DESCONTO10%0A`;
+  }
+  msg += `Total: R$ ${final.toFixed(2)}`;
+
+  await db.collection("historico").add({
+    cliente: clienteLogado.nome,
+    email: clienteLogado.email,
+    total: final.toFixed(2),
+    data: new Date().toISOString()
+  });
+
+  window.open(`https://wa.me/5593988098093?text=${msg}`, '_blank');
+  carrinho = [];
+  renderizarCarrinho();
+}
+
+function toggleFavorito(id, nome, preco) {
+  const index = favoritos.findIndex(f => f.id === id);
+  if (index >= 0) {
+    favoritos.splice(index, 1);
+  } else {
+    favoritos.push({ id, nome, preco });
+  }
+  renderizarFavoritos();
+}
+
+function renderizarFavoritos() {
+  const container = document.getElementById("favoritosContainer");
+  container.innerHTML = "";
+  favoritos.forEach(f => {
+    const div = document.createElement("div");
+    div.className = "carrinho-item";
+    div.innerHTML = `
+      <span>${f.nome} - R$ ${f.preco.toFixed(2)}</span>
+      <button onclick="adicionarAoCarrinho('${f.id}', '${f.nome}', ${f.preco})">Adicionar</button>
+    `;
+    container.appendChild(div);
+  });
+}
+
+async function mostrarHistorico() {
+  document.getElementById("areaCliente").classList.add("hidden");
+  document.getElementById("historicoContainer").classList.remove("hidden");
+  const container = document.getElementById("listaHistorico");
+  container.innerHTML = "";
+  const snapshot = await db.collection("historico")
+    .where("email", "==", clienteLogado.email).get();
+  if (snapshot.empty) {
+    container.innerHTML = "<p>Nenhum pedido encontrado.</p>";
+    return;
+  }
+  snapshot.forEach(doc => {
+    const h = doc.data();
+    const div = document.createElement("div");
+    div.className = "carrinho-item";
+    div.innerHTML = `<span>${new Date(h.data).toLocaleString()} - Total: R$ ${h.total}</span>`;
+    container.appendChild(div);
+  });
+}
+
+function voltarParaAreaCliente() {
+  document.getElementById("historicoContainer").classList.add("hidden");
+  document.getElementById("areaCliente").classList.remove("hidden");
+}
+
+auth.onAuthStateChanged(async user => {
+  if (user) {
+    const doc = await db.collection("clientes").doc(user.uid).get();
+    if (doc.exists) {
+      clienteLogado = doc.data();
+      document.getElementById("nomeExibicao").innerText = clienteLogado.nome;
+      document.getElementById("areaCliente").classList.remove("hidden");
+      renderizarProdutos();
+      renderizarCarrinho();
+    }
+  }
+});
+</script>
+</body>
+</html>
